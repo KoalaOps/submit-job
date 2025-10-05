@@ -109,13 +109,60 @@ runs:
         JOB_TYPE="${{ inputs.job_type }}"
         PARAMS="${{ inputs.parameters }}"
 
-        # Build parameter flags
-        PARAM_FLAGS=""
-        if [ -n "$PARAMS" ]; then
-          echo "📝 Processing parameters..."
-          while IFS= read -r p; do
-            PARAM_FLAGS="$PARAM_FLAGS -p $p"
-          done < <(echo "$PARAMS" | jq -r 'to_entries[] | "\(.key)=\(.value|tostring)"')
+        # If parameters provided, print a safe, partially masked preview
+        if [ -n "$PARAMS" ] && [ "$PARAMS" != "null" ]; then
+          echo "🔧 Parameters (partially masked):"
+          # Iterate keys and render safe preview
+          while IFS= read -r key; do
+            type=$(jq -r --arg k "$key" '(.[$k] | type)' <<<"$PARAMS")
+
+            case "$type" in
+              string)
+                val=$(jq -r --arg k "$key" '.[$k]' <<<"$PARAMS")
+                # Always mask full raw value so it won't leak elsewhere in logs
+                printf '::add-mask::%s\n' "$val"
+
+                len=${#val}
+                if [ "$len" -le 6 ]; then
+                  masked="$(printf '%*s' "$len" '' | tr ' ' '*')"   # fully mask short strings
+                else
+                  masked="${val:0:3}***${val: -2}"
+                fi
+                echo "  - $key: \"$masked\" (len=$len)"
+                ;;
+
+              number|boolean)
+                val=$(jq -r --arg k "$key" '.[$k]' <<<"$PARAMS")
+                echo "  - $key: $val"
+                ;;
+
+              array)
+                n=$(jq -r --arg k "$key" '(.[$k] | length)' <<<"$PARAMS")
+                echo "  - $key: array(len=$n)"
+                ;;
+
+              object)
+                n=$(jq -r --arg k "$key" '(.[$k] | keys | length)' <<<"$PARAMS")
+                echo "  - $key: object(keys=$n)"
+                ;;
+
+              null)
+                echo "  - $key: null"
+                ;;
+
+              *)
+                echo "  - $key: <$type>"
+                ;;
+            esac
+          done < <(jq -r 'keys[]' <<<"$PARAMS")
+        fi
+
+        # Build parameter flags safely (array preserves spaces/equals)
+        declare -a PARAM_FLAGS=()
+        if [ -n "$PARAMS" ] && [ "$PARAMS" != "null" ]; then
+          while IFS= read -r kv; do
+            PARAM_FLAGS+=(-p "$kv")
+          done < <(jq -r 'to_entries[] | "\(.key)=\(.value|tostring)"' <<<"$PARAMS")
         fi
 
         # Submit workflow based on type

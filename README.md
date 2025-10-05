@@ -62,11 +62,7 @@ Submits/triggers Kubernetes CronJobs or Argo Workflows. This action handles the 
     job_type: argo-workflow
     resource_name: data-processing-template
     namespace: workflows
-    parameters: |
-      {
-        "input_file": "s3://bucket/data.csv",
-        "output_path": "s3://bucket/results/"
-      }
+    parameters: '{"input_file":"s3://bucket/data.csv","output_path":"s3://bucket/results/"}'
 ```
 
 ### Argo CronWorkflow
@@ -78,10 +74,7 @@ Submits/triggers Kubernetes CronJobs or Argo Workflows. This action handles the 
     job_type: argo-cronworkflow
     resource_name: scheduled-report
     namespace: workflows
-    parameters: |
-      {
-        "report_date": "2024-01-15"
-      }
+    parameters: '{"report_date":"2024-01-15"}'
 ```
 
 ### Complete Workflow with Resolve

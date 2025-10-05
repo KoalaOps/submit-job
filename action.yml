@@ -36,19 +36,61 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Validate job type
+    - name: Validate inputs
       shell: bash
       run: |
+        set -euo pipefail
+
         JOB_TYPE="${{ inputs.job_type }}"
+        NAME="${{ inputs.resource_name }}"
+        NS="${{ inputs.namespace }}"
+        PARAMS_RAW='${{ inputs.parameters }}'
+
+        # --- job_type ---
         case "$JOB_TYPE" in
           kubernetes-cronjob|argo-workflow|argo-cronworkflow)
-            echo "✅ Valid job type: $JOB_TYPE"
+            echo "✅ job_type: $JOB_TYPE"
             ;;
           *)
             echo "::error::Invalid job_type: $JOB_TYPE. Must be one of: kubernetes-cronjob, argo-workflow, argo-cronworkflow"
             exit 1
             ;;
         esac
+
+        # --- resource_name ---
+        if [ -z "$NAME" ]; then
+          echo "::error::resource_name is required"
+          exit 1
+        fi
+        # k8s DNS-1123 label (common for names). Keep simple & readable.
+        if ! [[ "$NAME" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
+          echo "::warning::resource_name '$NAME' contains unusual characters for a k8s resource; proceeding but this might fail server-side"
+        fi
+        echo "✅ resource_name: $NAME"
+
+        # --- namespace ---
+        if [ -z "$NS" ]; then
+          echo "::error::namespace is required"
+          exit 1
+        fi
+        if ! [[ "$NS" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]]; then
+          echo "::error::namespace '$NS' is not a valid DNS-1123 name"
+          exit 1
+        fi
+        echo "✅ namespace: $NS"
+
+        # --- parameters (only for argo- types) ---
+        if [[ "$JOB_TYPE" == argo-* ]]; then
+          if [ -n "$PARAMS_RAW" ] && [ "$PARAMS_RAW" != "null" ]; then
+            if ! echo "$PARAMS_RAW" | jq -e 'type=="object"' >/dev/null 2>&1; then
+              echo "::error::inputs.parameters must be valid JSON object (e.g. {\"key\":\"value\"}). Got: $PARAMS_RAW"
+              exit 1
+            fi
+            echo "✅ parameters: valid JSON object"
+          else
+            echo "ℹ️ parameters: empty (no overrides)"
+          fi
+        fi
 
     - name: Install Argo CLI
       if: startsWith(inputs.job_type, 'argo-')

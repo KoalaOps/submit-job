@@ -1,0 +1,153 @@
+name: 'Submit Job'
+description: 'Submits/triggers Kubernetes CronJobs or Argo Workflows'
+author: 'KoalaOps'
+
+branding:
+  icon: 'play'
+  color: 'purple'
+
+inputs:
+  job_type:
+    description: 'Type of job (kubernetes-cronjob, argo-workflow, argo-cronworkflow)'
+    required: true
+  resource_name:
+    description: 'Name of the resource to trigger (CronJob/WorkflowTemplate/CronWorkflow)'
+    required: true
+  namespace:
+    description: 'Kubernetes namespace'
+    required: true
+  parameters:
+    description: 'JSON object of parameters for Argo workflows (e.g., {"key1":"value1","key2":"value2"})'
+    required: false
+    default: ''
+  argo_version:
+    description: 'Argo CLI version to install (only for Argo workflows)'
+    required: false
+    default: '3.5.3'
+
+outputs:
+  created_name:
+    description: 'Name of the created Job or Workflow'
+    value: ${{ steps.execute-cronjob.outputs.job_name || steps.execute-argo.outputs.workflow_name }}
+  created_kind:
+    description: 'Kind of the created resource (job or workflow)'
+    value: ${{ steps.execute-cronjob.outputs.kind || steps.execute-argo.outputs.kind }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate job type
+      shell: bash
+      run: |
+        JOB_TYPE="${{ inputs.job_type }}"
+        case "$JOB_TYPE" in
+          kubernetes-cronjob|argo-workflow|argo-cronworkflow)
+            echo "✅ Valid job type: $JOB_TYPE"
+            ;;
+          *)
+            echo "::error::Invalid job_type: $JOB_TYPE. Must be one of: kubernetes-cronjob, argo-workflow, argo-cronworkflow"
+            exit 1
+            ;;
+        esac
+
+    - name: Install Argo CLI
+      if: startsWith(inputs.job_type, 'argo-')
+      shell: bash
+      run: |
+        set -euo pipefail
+        ARGO_VERSION="${{ inputs.argo_version }}"
+
+        echo "📦 Installing Argo CLI v${ARGO_VERSION}..."
+        curl -sLO "https://github.com/argoproj/argo-workflows/releases/download/v${ARGO_VERSION}/argo-linux-amd64.gz"
+        gunzip argo-linux-amd64.gz
+        chmod +x argo-linux-amd64
+        sudo mv argo-linux-amd64 /usr/local/bin/argo
+
+        echo "✅ Argo CLI installed:"
+        argo version
+
+    - name: Execute Kubernetes CronJob
+      if: inputs.job_type == 'kubernetes-cronjob'
+      id: execute-cronjob
+      shell: bash
+      run: |
+        set -euo pipefail
+        NAME="${{ inputs.resource_name }}"
+        NS="${{ inputs.namespace }}"
+
+        echo "🚀 Creating Job from CronJob '${NAME}' in namespace '${NS}'"
+
+        # Generate unique job name with timestamp
+        BASE="${NAME}-manual"
+        TS="$(date +%s)"
+        JNAME="${BASE}-${TS}"
+
+        # Ensure name doesn't exceed 63 characters (K8s limit)
+        if [ ${#JNAME} -gt 63 ]; then
+          CUT=$((63 - 11))  # reserve "-1234567890" for timestamp
+          JNAME="$(echo "$BASE" | cut -c1-$CUT)-${TS}"
+        fi
+
+        # Create job from cronjob
+        kubectl create job "$JNAME" --from=cronjob/"$NAME" -n "$NS"
+
+        echo "✅ Created Job: $JNAME"
+        kubectl describe job/"$JNAME" -n "$NS"
+
+        # Set outputs
+        echo "job_name=$JNAME" >> "$GITHUB_OUTPUT"
+        echo "kind=job" >> "$GITHUB_OUTPUT"
+
+    - name: Execute Argo Workflow
+      if: startsWith(inputs.job_type, 'argo-')
+      id: execute-argo
+      shell: bash
+      run: |
+        set -euo pipefail
+        NS="${{ inputs.namespace }}"
+        NAME="${{ inputs.resource_name }}"
+        JOB_TYPE="${{ inputs.job_type }}"
+        PARAMS="${{ inputs.parameters }}"
+
+        # Build parameter flags
+        PARAM_FLAGS=""
+        if [ -n "$PARAMS" ]; then
+          echo "📝 Processing parameters..."
+          while IFS= read -r p; do
+            PARAM_FLAGS="$PARAM_FLAGS -p $p"
+          done < <(echo "$PARAMS" | jq -r 'to_entries[] | "\(.key)=\(.value|tostring)"')
+        fi
+
+        # Submit workflow based on type
+        if [ "$JOB_TYPE" = "argo-cronworkflow" ]; then
+          echo "🚀 Submitting from CronWorkflow/${NAME} in namespace ${NS}"
+          CREATED_JSON=$(argo submit --from "cronwf/${NAME}" -n "${NS}" ${PARAM_FLAGS} -o json)
+        else
+          echo "🚀 Submitting from WorkflowTemplate/${NAME} in namespace ${NS}"
+          CREATED_JSON=$(argo submit --from "workflowtemplate/${NAME}" -n "${NS}" ${PARAM_FLAGS} -o json)
+        fi
+
+        # Extract workflow name
+        WF_NAME="$(echo "$CREATED_JSON" | jq -r '.metadata.name')"
+
+        echo "✅ Created workflow: ${WF_NAME}"
+        kubectl describe workflow/"${WF_NAME}" -n "${NS}"
+
+        # Set outputs
+        echo "workflow_name=$WF_NAME" >> "$GITHUB_OUTPUT"
+        echo "kind=workflow" >> "$GITHUB_OUTPUT"
+
+    - name: Summary
+      shell: bash
+      run: |
+        {
+          echo "## Job Submission Summary"
+          echo "- **Job Type**: ${{ inputs.job_type }}"
+          echo "- **Resource Name**: ${{ inputs.resource_name }}"
+          echo "- **Namespace**: ${{ inputs.namespace }}"
+          echo "- **Created**: ${{ steps.execute-cronjob.outputs.job_name || steps.execute-argo.outputs.workflow_name }}"
+          if [ -n "${{ inputs.parameters }}" ]; then
+            KEYS=$(echo '${{ inputs.parameters }}' | jq -r 'keys | join(", ")')
+            echo "- **Parameters**: (keys: ${KEYS})"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

@@ -136,18 +136,3 @@ runs:
         # Set outputs
         echo "workflow_name=$WF_NAME" >> "$GITHUB_OUTPUT"
         echo "kind=workflow" >> "$GITHUB_OUTPUT"
-
-    - name: Summary
-      shell: bash
-      run: |
-        {
-          echo "## Job Submission Summary"
-          echo "- **Job Type**: ${{ inputs.job_type }}"
-          echo "- **Resource Name**: ${{ inputs.resource_name }}"
-          echo "- **Namespace**: ${{ inputs.namespace }}"
-          echo "- **Created**: ${{ steps.execute-cronjob.outputs.job_name || steps.execute-argo.outputs.workflow_name }}"
-          if [ -n "${{ inputs.parameters }}" ]; then
-            KEYS=$(echo '${{ inputs.parameters }}' | jq -r 'keys | join(", ")')
-            echo "- **Parameters**: (keys: ${KEYS})"
-          fi
-        } >> "$GITHUB_STEP_SUMMARY"

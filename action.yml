@@ -168,10 +168,16 @@ runs:
         # Submit workflow based on type
         if [ "$JOB_TYPE" = "argo-cronworkflow" ]; then
           echo "🚀 Submitting from CronWorkflow/${NAME} in namespace ${NS}"
-          CREATED_JSON=$(argo submit --from "cronwf/${NAME}" -n "${NS}" ${PARAM_FLAGS} -o json)
+          if ! CREATED_JSON=$(argo submit --from "cronwf/${NAME}" -n "${NS}" "${PARAM_FLAGS[@]}" -o json 2>&1); then
+            echo "::error::Failed to submit workflow: $CREATED_JSON"
+            exit 1
+          fi
         else
           echo "🚀 Submitting from WorkflowTemplate/${NAME} in namespace ${NS}"
-          CREATED_JSON=$(argo submit --from "workflowtemplate/${NAME}" -n "${NS}" ${PARAM_FLAGS} -o json)
+          if ! CREATED_JSON=$(argo submit --from "workflowtemplate/${NAME}" -n "${NS}" "${PARAM_FLAGS[@]}" -o json 2>&1); then
+            echo "::error::Failed to submit workflow: $CREATED_JSON"
+            exit 1
+          fi
         fi
 
         # Extract workflow name

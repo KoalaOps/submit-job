@@ -149,7 +149,7 @@ runs:
         NS="${{ inputs.namespace }}"
         NAME="${{ inputs.resource_name }}"
         JOB_TYPE="${{ inputs.job_type }}"
-        PARAMS="${{ inputs.parameters }}"
+        PARAMS='${{ inputs.parameters }}'
 
         # If parameters provided, print preview
         if [ -n "$PARAMS" ] && [ "$PARAMS" != "null" ]; then
